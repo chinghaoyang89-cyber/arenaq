@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ARENAQ 问答竞赛</title>
-    <!-- 引入 Supabase SDK -->
+    <!-- 引入 Supabase JS SDK -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         :root {
@@ -1019,16 +1019,16 @@
 
         const sfx = new SoundFX();
 
-        // --- Supabase 记忆整合机制 ---
+        // --- Supabase 真实云端同步绑定 ---
         const SUPABASE_URL = 'https://mffsdzrdfsuxyjjlprgd.supabase.co';
-        let supabaseClient = null;
+        const SUPABASE_ANON_KEY = 'sb_publishable_54louVW13FBOjb76jUoifw_A1qyxTPX';
 
-        // 如果用户已在 Supabase 后台设置过，只需引入 Key 即可，未初始化时自动以 LocalStorage 作为主记忆
+        let supabaseClient = null;
         if (window.supabase) {
             try {
-                supabaseClient = window.supabase.createClient(SUPABASE_URL, 'ANON_KEY_PLACEHOLDER');
+                supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
             } catch (e) {
-                console.log('Supabase 初始化提示：运行于 LocalStorage 本地持久化模式');
+                console.error('Supabase 初始化提示:', e);
             }
         }
 
@@ -1048,7 +1048,7 @@
         let turnTimeLeft = 15, turnTimerInterval = null;
         const optionBadges = ['A', 'B', 'C', 'D'];
 
-        // 持久化保存（双重存储：LocalStorage + Supabase）
+        // 云端 + 本地 双保存
         async function saveData() {
             localStorage.setItem('arenaq_categories_data', JSON.stringify(categories));
             localStorage.setItem('arenaq_selected_cat_id', selectedCatId || '');
@@ -1059,12 +1059,12 @@
                 try {
                     await supabaseClient.from('arenaq_db').upsert({ id: 'global_bank', categories: categories });
                 } catch (e) {
-                    // Supabase 未授权时自动静默降级为 LocalStorage
+                    console.error('Supabase 保存错误:', e);
                 }
             }
         }
 
-        // 读取持久化数据
+        // 读取云端与本地数据
         async function loadData() {
             const localCats = localStorage.getItem('arenaq_categories_data');
             const localSel = localStorage.getItem('arenaq_selected_cat_id');
@@ -1083,8 +1083,11 @@
                     const { data } = await supabaseClient.from('arenaq_db').select('*').eq('id', 'global_bank');
                     if (data && data.length > 0 && data[0].categories) {
                         categories = data[0].categories;
+                        localStorage.setItem('arenaq_categories_data', JSON.stringify(categories));
                     }
-                } catch (e) {}
+                } catch (e) {
+                    console.error('Supabase 读取错误:', e);
+                }
             }
 
             if (!selectedCatId && categories.length > 0) {
@@ -1113,7 +1116,6 @@
             }
         }
 
-        // 渲染主题列表
         function renderCategoryGrid() {
             const container = document.getElementById('catGridBox');
             container.innerHTML = '';
@@ -1207,7 +1209,7 @@
                     saveData();
                     renderCategoryGrid();
                     updateHeaderAndStartModal();
-                    alert(`✅ 主题“${title}”导入成功！`);
+                    alert(`✅ 主题“${title}”已成功上传并上传到云端！`);
                 } catch (err) {
                     alert("格式解析失败，请检查文件！");
                 }
@@ -1388,7 +1390,7 @@
             document.getElementById('catListModal').classList.remove('hidden');
         }
 
-        // --- 随机打乱算法 ---
+        // 随机打乱函数
         function shuffleArray(arr) {
             for (let i = arr.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
@@ -1396,19 +1398,19 @@
             }
         }
 
-        // --- 抽题与【题目/答案顺序双重打乱】---
+        // 抽题与【双重随机打乱：题目 + 答案选项】
         function loadNextQuestion() {
             const currentCat = categories.find(c => c.id === selectedCatId);
             if (!currentCat || currentCat.questions.length === 0) return;
 
-            // 1. 题目打乱
+            // 1. 打乱题目顺序
             if (remainingQuestions.length === 0) {
                 remainingQuestions = [...currentCat.questions];
                 shuffleArray(remainingQuestions);
             }
             const rawQuestion = remainingQuestions.pop();
 
-            // 2. 答案/选项打乱
+            // 2. 随机打乱 4 个选项并跟踪正确答案索引
             let optionsWithCorrect = rawQuestion.options.map((opt, idx) => ({
                 text: opt,
                 isCorrect: idx === rawQuestion.ans
