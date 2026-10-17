@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ARENAQ 问答竞赛</title>
+    <!-- 引入 Supabase SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         :root {
             --primary-green: #15803d;
@@ -825,7 +827,7 @@
         <div class="modal-card">
             <div class="modal-title">⚙️ 竞赛与题库设置</div>
 
-            <!-- 时间调整 -->
+            <!-- 时间手动设置 -->
             <div class="timer-settings-box">
                 <div style="font-weight:bold; color:var(--primary-green);">⏱️ 时间调整：</div>
                 <div style="display:flex; gap:10px; align-items:center;">
@@ -859,8 +861,7 @@
             </div>
 
             <div class="btn-group">
-                <button class="action-btn secondary" onclick="exportDataJSON()">📤 导出当前题库</button>
-                <button class="action-btn secondary" onclick="downloadTemplate()">📥 下载JSON模板</button>
+                <button class="action-btn secondary" onclick="downloadTemplate()">📥 下载模板</button>
                 <button class="action-btn" onclick="saveSettingsAndClose()">保存并返回</button>
             </div>
         </div>
@@ -960,7 +961,7 @@
     </div>
 
     <script>
-        // 音效合成器
+        // --- 音效合成器 ---
         class SoundFX {
             constructor() { this.ctx = null; }
             init() {
@@ -1018,58 +1019,82 @@
 
         const sfx = new SoundFX();
 
-        // 默认内置代码题库（如果你希望其他电脑直接访问就有数据，可直接在此填写）
-        let categories = [];
+        // --- Supabase 记忆整合机制 ---
+        const SUPABASE_URL = 'https://mffsdzrdfsuxyjjlprgd.supabase.co';
+        let supabaseClient = null;
 
+        // 如果用户已在 Supabase 后台设置过，只需引入 Key 即可，未初始化时自动以 LocalStorage 作为主记忆
+        if (window.supabase) {
+            try {
+                supabaseClient = window.supabase.createClient(SUPABASE_URL, 'ANON_KEY_PLACEHOLDER');
+            } catch (e) {
+                console.log('Supabase 初始化提示：运行于 LocalStorage 本地持久化模式');
+            }
+        }
+
+        let categories = [];
         let selectedCatId = null; 
         let managingCatId = null; 
         let currentEditingQIndex = -1; 
 
-        // 时间变量
         let totalTimeMinutes = 3;
         let turnTimeSeconds = 15;
 
         let remainingQuestions = [];
-        let currentQuestion = null; // 当前渲染题目的对象（包含打乱后的选项）
+        let currentQuestion = null;
         let activeSide = 'left';
         let scoreLeft = 0, scoreRight = 0;
         let totalTimeLeft = 180, totalTimerInterval = null;
         let turnTimeLeft = 15, turnTimerInterval = null;
         const optionBadges = ['A', 'B', 'C', 'D'];
 
-        // ----------------------------------------------------
-        // LocalStorage 本地存储控制 (刷新不丢失)
-        // ----------------------------------------------------
-        function saveToLocalStorage() {
-            try {
-                localStorage.setItem('arenaq_categories', JSON.stringify(categories));
-                localStorage.setItem('arenaq_selectedCatId', selectedCatId || '');
-                localStorage.setItem('arenaq_totMin', totalTimeMinutes);
-                localStorage.setItem('arenaq_trnSec', turnTimeSeconds);
-            } catch (e) { console.error('保存本地配置失败', e); }
+        // 持久化保存（双重存储：LocalStorage + Supabase）
+        async function saveData() {
+            localStorage.setItem('arenaq_categories_data', JSON.stringify(categories));
+            localStorage.setItem('arenaq_selected_cat_id', selectedCatId || '');
+            localStorage.setItem('arenaq_total_time', totalTimeMinutes);
+            localStorage.setItem('arenaq_turn_time', turnTimeSeconds);
+
+            if (supabaseClient) {
+                try {
+                    await supabaseClient.from('arenaq_db').upsert({ id: 'global_bank', categories: categories });
+                } catch (e) {
+                    // Supabase 未授权时自动静默降级为 LocalStorage
+                }
+            }
         }
 
-        function loadFromLocalStorage() {
-            try {
-                const savedCats = localStorage.getItem('arenaq_categories');
-                if (savedCats) categories = JSON.parse(savedCats);
+        // 读取持久化数据
+        async function loadData() {
+            const localCats = localStorage.getItem('arenaq_categories_data');
+            const localSel = localStorage.getItem('arenaq_selected_cat_id');
+            const localTot = localStorage.getItem('arenaq_total_time');
+            const localTrn = localStorage.getItem('arenaq_turn_time');
 
-                const savedSelId = localStorage.getItem('arenaq_selectedCatId');
-                if (savedSelId && categories.some(c => c.id === savedSelId)) {
-                    selectedCatId = savedSelId;
-                } else if (categories.length > 0) {
-                    selectedCatId = categories[0].id;
-                }
+            if (localCats) {
+                try { categories = JSON.parse(localCats); } catch(e){}
+            }
+            if (localSel) selectedCatId = localSel;
+            if (localTot) totalTimeMinutes = parseInt(localTot);
+            if (localTrn) turnTimeSeconds = parseInt(localTrn);
 
-                const savedTot = localStorage.getItem('arenaq_totMin');
-                if (savedTot) totalTimeMinutes = parseInt(savedTot);
+            if (supabaseClient) {
+                try {
+                    const { data } = await supabaseClient.from('arenaq_db').select('*').eq('id', 'global_bank');
+                    if (data && data.length > 0 && data[0].categories) {
+                        categories = data[0].categories;
+                    }
+                } catch (e) {}
+            }
 
-                const savedTrn = localStorage.getItem('arenaq_trnSec');
-                if (savedTrn) turnTimeSeconds = parseInt(savedTrn);
+            if (!selectedCatId && categories.length > 0) {
+                selectedCatId = categories[0].id;
+            }
 
-                document.getElementById('totalTimeInput').value = totalTimeMinutes;
-                document.getElementById('turnTimeInput').value = turnTimeSeconds;
-            } catch (e) { console.error('读取本地配置失败', e); }
+            document.getElementById('totalTimeInput').value = totalTimeMinutes;
+            document.getElementById('turnTimeInput').value = turnTimeSeconds;
+
+            updateHeaderAndStartModal();
         }
 
         // 初始化背景
@@ -1120,7 +1145,7 @@
 
         function selectCategory(catId) {
             selectedCatId = catId;
-            saveToLocalStorage();
+            saveData();
             renderCategoryGrid();
             updateHeaderAndStartModal();
         }
@@ -1143,7 +1168,7 @@
             if (!selectedCatId) selectedCatId = newCat.id;
             
             input.value = '';
-            saveToLocalStorage();
+            saveData();
             renderCategoryGrid();
             updateHeaderAndStartModal();
         }
@@ -1154,7 +1179,7 @@
                 if (selectedCatId === catId) {
                     selectedCatId = categories.length > 0 ? categories[0].id : null;
                 }
-                saveToLocalStorage();
+                saveData();
                 renderCategoryGrid();
                 updateHeaderAndStartModal();
             }
@@ -1179,7 +1204,7 @@
 
                     categories.push(newCat);
                     selectedCatId = newCat.id;
-                    saveToLocalStorage();
+                    saveData();
                     renderCategoryGrid();
                     updateHeaderAndStartModal();
                     alert(`✅ 主题“${title}”导入成功！`);
@@ -1259,7 +1284,7 @@
             document.getElementById('newOptC').value = '';
             document.getElementById('newOptD').value = '';
 
-            saveToLocalStorage();
+            saveData();
             renderQuestionListInCat();
         }
 
@@ -1267,7 +1292,7 @@
             const cat = categories.find(c => c.id === managingCatId);
             if (cat) {
                 cat.questions.splice(idx, 1);
-                saveToLocalStorage();
+                saveData();
                 renderQuestionListInCat();
             }
         }
@@ -1316,7 +1341,7 @@
                 ans: correctAns
             };
 
-            saveToLocalStorage();
+            saveData();
             closeEditModal();
             renderQuestionListInCat();
         }
@@ -1328,7 +1353,7 @@
             if (totInput && totInput > 0) totalTimeMinutes = totInput;
             if (trnInput && trnInput > 0) turnTimeSeconds = trnInput;
 
-            saveToLocalStorage();
+            saveData();
             document.getElementById('catListModal').classList.add('hidden');
             updateHeaderAndStartModal();
 
@@ -1363,34 +1388,7 @@
             document.getElementById('catListModal').classList.remove('hidden');
         }
 
-        // 比赛流程控制
-        function startGame() {
-            const currentCat = categories.find(c => c.id === selectedCatId);
-            if (!currentCat || currentCat.questions.length === 0) {
-                alert("请先选择或添加包含题目的主题！");
-                return;
-            }
-
-            document.getElementById('startModal').classList.add('hidden');
-            scoreLeft = 0; scoreRight = 0;
-            updateScoreDisplay();
-
-            remainingQuestions = [...currentCat.questions];
-            shuffleArray(remainingQuestions);
-
-            totalTimeLeft = totalTimeMinutes * 60;
-            activeSide = 'left';
-
-            loadNextQuestion();
-            startTotalTimer();
-            startTurnTimer();
-        }
-
-        function restartGame() {
-            document.getElementById('endModal').classList.add('hidden');
-            startGame();
-        }
-
+        // --- 随机打乱算法 ---
         function shuffleArray(arr) {
             for (let i = arr.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
@@ -1398,32 +1396,29 @@
             }
         }
 
-        // ----------------------------------------------------
-        // 核心修改 1：加载新题并随机打乱“选项（A/B/C/D）”
-        // ----------------------------------------------------
+        // --- 抽题与【题目/答案顺序双重打乱】---
         function loadNextQuestion() {
             const currentCat = categories.find(c => c.id === selectedCatId);
             if (!currentCat || currentCat.questions.length === 0) return;
 
+            // 1. 题目打乱
             if (remainingQuestions.length === 0) {
                 remainingQuestions = [...currentCat.questions];
                 shuffleArray(remainingQuestions);
             }
-            
-            const rawQ = remainingQuestions.pop();
+            const rawQuestion = remainingQuestions.pop();
 
-            // 构造打乱后的选项数组对象，并准确追踪正确答案
-            let mappedOptions = rawQ.options.map((optText, index) => ({
-                text: optText,
-                isCorrect: (index === rawQ.ans)
+            // 2. 答案/选项打乱
+            let optionsWithCorrect = rawQuestion.options.map((opt, idx) => ({
+                text: opt,
+                isCorrect: idx === rawQuestion.ans
             }));
-            
-            // 打乱选项顺序
-            shuffleArray(mappedOptions);
+            shuffleArray(optionsWithCorrect);
 
             currentQuestion = {
-                q: rawQ.q,
-                shuffledOptions: mappedOptions
+                q: rawQuestion.q,
+                options: optionsWithCorrect.map(o => o.text),
+                ans: optionsWithCorrect.findIndex(o => o.isCorrect)
             };
 
             renderQuestion();
@@ -1436,11 +1431,11 @@
                 const container = document.getElementById(`options${s}`);
                 container.innerHTML = '';
 
-                currentQuestion.shuffledOptions.forEach((optObj, idx) => {
+                currentQuestion.options.forEach((optText, idx) => {
                     const btn = document.createElement('button');
                     btn.className = 'option-btn';
-                    btn.onclick = () => handleAnswer(optObj.isCorrect);
-                    btn.innerHTML = `<div class="option-badge">${optionBadges[idx]}</div><span>${optObj.text}</span>`;
+                    btn.onclick = () => handleAnswer(idx);
+                    btn.innerHTML = `<div class="option-badge">${optionBadges[idx]}</div><span>${optText}</span>`;
                     container.appendChild(btn);
                 });
             });
@@ -1460,10 +1455,10 @@
             }
         }
 
-        function handleAnswer(isCorrect) {
+        function handleAnswer(selectedIndex) {
             clearInterval(turnTimerInterval);
 
-            if (isCorrect) {
+            if (selectedIndex === currentQuestion.ans) {
                 sfx.playCorrect();
                 if (activeSide === 'left') scoreLeft++;
                 else scoreRight++;
@@ -1555,6 +1550,33 @@
             setTimeout(() => container.classList.remove('show'), 1600);
         }
 
+        function startGame() {
+            const currentCat = categories.find(c => c.id === selectedCatId);
+            if (!currentCat || currentCat.questions.length === 0) {
+                alert("请先选择或添加包含题目的主题！");
+                return;
+            }
+
+            document.getElementById('startModal').classList.add('hidden');
+            scoreLeft = 0; scoreRight = 0;
+            updateScoreDisplay();
+
+            remainingQuestions = [...currentCat.questions];
+            shuffleArray(remainingQuestions);
+
+            totalTimeLeft = totalTimeMinutes * 60;
+            activeSide = 'left';
+
+            loadNextQuestion();
+            startTotalTimer();
+            startTurnTimer();
+        }
+
+        function restartGame() {
+            document.getElementById('endModal').classList.add('hidden');
+            startGame();
+        }
+
         function endGame() {
             sfx.playWin();
             document.getElementById('endScoreLeft').innerText = scoreLeft;
@@ -1577,32 +1599,12 @@
             document.getElementById('endModal').classList.remove('hidden');
         }
 
-        // 导出备份题库 JSON
-        function exportDataJSON() {
-            if (categories.length === 0) {
-                alert("题库为空，无可导出数据！");
-                return;
-            }
-            const currentCat = categories.find(c => c.id === selectedCatId) || categories[0];
-            const exportData = {
-                topic: currentCat.title,
-                questions: currentCat.questions
-            };
-            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
-            const downloadAnchor = document.createElement('a');
-            downloadAnchor.setAttribute("href", dataStr);
-            downloadAnchor.setAttribute("download", `ARENAQ_${currentCat.title}.json`);
-            document.body.appendChild(downloadAnchor);
-            downloadAnchor.click();
-            downloadAnchor.remove();
-        }
-
         function downloadTemplate() {
             const templateData = {
-                topic: "示例主题名称",
+                topic: "示例主题",
                 questions: [
                     {
-                        q: "这是问题示例内容？",
+                        q: "示例问题一？",
                         options: ["选项A", "选项B", "选项C", "选项D"],
                         ans: 0
                     }
@@ -1611,16 +1613,15 @@
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(templateData, null, 2));
             const downloadAnchor = document.createElement('a');
             downloadAnchor.setAttribute("href", dataStr);
-            downloadAnchor.setAttribute("download", "ARENAQ_题库模板.json");
+            downloadAnchor.setAttribute("download", "ARENAQ_模板.json");
             document.body.appendChild(downloadAnchor);
             downloadAnchor.click();
             downloadAnchor.remove();
         }
 
-        window.onload = () => {
+        window.onload = async () => {
             initLeafBg();
-            loadFromLocalStorage(); // 读取本地持久化题库
-            updateHeaderAndStartModal();
+            await loadData();
         };
     </script>
 </body>
