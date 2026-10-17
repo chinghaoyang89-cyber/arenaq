@@ -820,12 +820,12 @@
         </div>
     </div>
 
-    <!-- 设置 Modal (包含主题列表与时间设置) -->
+    <!-- 设置 Modal -->
     <div class="modal-mask hidden" id="catListModal">
         <div class="modal-card">
             <div class="modal-title">⚙️ 竞赛与题库设置</div>
 
-            <!-- 时间手动设置 -->
+            <!-- 时间调整 -->
             <div class="timer-settings-box">
                 <div style="font-weight:bold; color:var(--primary-green);">⏱️ 时间调整：</div>
                 <div style="display:flex; gap:10px; align-items:center;">
@@ -859,7 +859,8 @@
             </div>
 
             <div class="btn-group">
-                <button class="action-btn secondary" onclick="downloadTemplate()">📥 下载模板</button>
+                <button class="action-btn secondary" onclick="exportDataJSON()">📤 导出当前题库</button>
+                <button class="action-btn secondary" onclick="downloadTemplate()">📥 下载JSON模板</button>
                 <button class="action-btn" onclick="saveSettingsAndClose()">保存并返回</button>
             </div>
         </div>
@@ -1017,23 +1018,59 @@
 
         const sfx = new SoundFX();
 
-        // 数据结构与计时参数
+        // 默认内置代码题库（如果你希望其他电脑直接访问就有数据，可直接在此填写）
         let categories = [];
+
         let selectedCatId = null; 
         let managingCatId = null; 
         let currentEditingQIndex = -1; 
 
-        // 可手动调整的时间变量
+        // 时间变量
         let totalTimeMinutes = 3;
         let turnTimeSeconds = 15;
 
         let remainingQuestions = [];
-        let currentQuestion = null;
+        let currentQuestion = null; // 当前渲染题目的对象（包含打乱后的选项）
         let activeSide = 'left';
         let scoreLeft = 0, scoreRight = 0;
         let totalTimeLeft = 180, totalTimerInterval = null;
         let turnTimeLeft = 15, turnTimerInterval = null;
         const optionBadges = ['A', 'B', 'C', 'D'];
+
+        // ----------------------------------------------------
+        // LocalStorage 本地存储控制 (刷新不丢失)
+        // ----------------------------------------------------
+        function saveToLocalStorage() {
+            try {
+                localStorage.setItem('arenaq_categories', JSON.stringify(categories));
+                localStorage.setItem('arenaq_selectedCatId', selectedCatId || '');
+                localStorage.setItem('arenaq_totMin', totalTimeMinutes);
+                localStorage.setItem('arenaq_trnSec', turnTimeSeconds);
+            } catch (e) { console.error('保存本地配置失败', e); }
+        }
+
+        function loadFromLocalStorage() {
+            try {
+                const savedCats = localStorage.getItem('arenaq_categories');
+                if (savedCats) categories = JSON.parse(savedCats);
+
+                const savedSelId = localStorage.getItem('arenaq_selectedCatId');
+                if (savedSelId && categories.some(c => c.id === savedSelId)) {
+                    selectedCatId = savedSelId;
+                } else if (categories.length > 0) {
+                    selectedCatId = categories[0].id;
+                }
+
+                const savedTot = localStorage.getItem('arenaq_totMin');
+                if (savedTot) totalTimeMinutes = parseInt(savedTot);
+
+                const savedTrn = localStorage.getItem('arenaq_trnSec');
+                if (savedTrn) turnTimeSeconds = parseInt(savedTrn);
+
+                document.getElementById('totalTimeInput').value = totalTimeMinutes;
+                document.getElementById('turnTimeInput').value = turnTimeSeconds;
+            } catch (e) { console.error('读取本地配置失败', e); }
+        }
 
         // 初始化背景
         function initLeafBg() {
@@ -1083,6 +1120,7 @@
 
         function selectCategory(catId) {
             selectedCatId = catId;
+            saveToLocalStorage();
             renderCategoryGrid();
             updateHeaderAndStartModal();
         }
@@ -1105,6 +1143,7 @@
             if (!selectedCatId) selectedCatId = newCat.id;
             
             input.value = '';
+            saveToLocalStorage();
             renderCategoryGrid();
             updateHeaderAndStartModal();
         }
@@ -1115,6 +1154,7 @@
                 if (selectedCatId === catId) {
                     selectedCatId = categories.length > 0 ? categories[0].id : null;
                 }
+                saveToLocalStorage();
                 renderCategoryGrid();
                 updateHeaderAndStartModal();
             }
@@ -1139,6 +1179,7 @@
 
                     categories.push(newCat);
                     selectedCatId = newCat.id;
+                    saveToLocalStorage();
                     renderCategoryGrid();
                     updateHeaderAndStartModal();
                     alert(`✅ 主题“${title}”导入成功！`);
@@ -1218,6 +1259,7 @@
             document.getElementById('newOptC').value = '';
             document.getElementById('newOptD').value = '';
 
+            saveToLocalStorage();
             renderQuestionListInCat();
         }
 
@@ -1225,6 +1267,7 @@
             const cat = categories.find(c => c.id === managingCatId);
             if (cat) {
                 cat.questions.splice(idx, 1);
+                saveToLocalStorage();
                 renderQuestionListInCat();
             }
         }
@@ -1273,18 +1316,19 @@
                 ans: correctAns
             };
 
+            saveToLocalStorage();
             closeEditModal();
             renderQuestionListInCat();
         }
 
         function saveSettingsAndClose() {
-            // 读取手动调整的时间
             const totInput = parseInt(document.getElementById('totalTimeInput').value);
             const trnInput = parseInt(document.getElementById('turnTimeInput').value);
 
             if (totInput && totInput > 0) totalTimeMinutes = totInput;
             if (trnInput && trnInput > 0) turnTimeSeconds = trnInput;
 
+            saveToLocalStorage();
             document.getElementById('catListModal').classList.add('hidden');
             updateHeaderAndStartModal();
 
@@ -1292,8 +1336,7 @@
             if (currentCat && currentCat.questions.length > 0) {
                 remainingQuestions = [...currentCat.questions];
                 shuffleArray(remainingQuestions);
-                currentQuestion = remainingQuestions.pop();
-                renderQuestion();
+                loadNextQuestion();
             }
         }
 
@@ -1355,6 +1398,9 @@
             }
         }
 
+        // ----------------------------------------------------
+        // 核心修改 1：加载新题并随机打乱“选项（A/B/C/D）”
+        // ----------------------------------------------------
         function loadNextQuestion() {
             const currentCat = categories.find(c => c.id === selectedCatId);
             if (!currentCat || currentCat.questions.length === 0) return;
@@ -1363,7 +1409,23 @@
                 remainingQuestions = [...currentCat.questions];
                 shuffleArray(remainingQuestions);
             }
-            currentQuestion = remainingQuestions.pop();
+            
+            const rawQ = remainingQuestions.pop();
+
+            // 构造打乱后的选项数组对象，并准确追踪正确答案
+            let mappedOptions = rawQ.options.map((optText, index) => ({
+                text: optText,
+                isCorrect: (index === rawQ.ans)
+            }));
+            
+            // 打乱选项顺序
+            shuffleArray(mappedOptions);
+
+            currentQuestion = {
+                q: rawQ.q,
+                shuffledOptions: mappedOptions
+            };
+
             renderQuestion();
         }
 
@@ -1374,11 +1436,11 @@
                 const container = document.getElementById(`options${s}`);
                 container.innerHTML = '';
 
-                currentQuestion.options.forEach((optText, idx) => {
+                currentQuestion.shuffledOptions.forEach((optObj, idx) => {
                     const btn = document.createElement('button');
                     btn.className = 'option-btn';
-                    btn.onclick = () => handleAnswer(idx);
-                    btn.innerHTML = `<div class="option-badge">${optionBadges[idx]}</div><span>${optText}</span>`;
+                    btn.onclick = () => handleAnswer(optObj.isCorrect);
+                    btn.innerHTML = `<div class="option-badge">${optionBadges[idx]}</div><span>${optObj.text}</span>`;
                     container.appendChild(btn);
                 });
             });
@@ -1398,10 +1460,10 @@
             }
         }
 
-        function handleAnswer(selectedIndex) {
+        function handleAnswer(isCorrect) {
             clearInterval(turnTimerInterval);
 
-            if (selectedIndex === currentQuestion.ans) {
+            if (isCorrect) {
                 sfx.playCorrect();
                 if (activeSide === 'left') scoreLeft++;
                 else scoreRight++;
@@ -1515,12 +1577,32 @@
             document.getElementById('endModal').classList.remove('hidden');
         }
 
+        // 导出备份题库 JSON
+        function exportDataJSON() {
+            if (categories.length === 0) {
+                alert("题库为空，无可导出数据！");
+                return;
+            }
+            const currentCat = categories.find(c => c.id === selectedCatId) || categories[0];
+            const exportData = {
+                topic: currentCat.title,
+                questions: currentCat.questions
+            };
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
+            const downloadAnchor = document.createElement('a');
+            downloadAnchor.setAttribute("href", dataStr);
+            downloadAnchor.setAttribute("download", `ARENAQ_${currentCat.title}.json`);
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            downloadAnchor.remove();
+        }
+
         function downloadTemplate() {
             const templateData = {
-                topic: "自定义主题示例",
+                topic: "示例主题名称",
                 questions: [
                     {
-                        q: "示例问题一？",
+                        q: "这是问题示例内容？",
                         options: ["选项A", "选项B", "选项C", "选项D"],
                         ans: 0
                     }
@@ -1529,7 +1611,7 @@
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(templateData, null, 2));
             const downloadAnchor = document.createElement('a');
             downloadAnchor.setAttribute("href", dataStr);
-            downloadAnchor.setAttribute("download", "ARENAQ_模板.json");
+            downloadAnchor.setAttribute("download", "ARENAQ_题库模板.json");
             document.body.appendChild(downloadAnchor);
             downloadAnchor.click();
             downloadAnchor.remove();
@@ -1537,6 +1619,7 @@
 
         window.onload = () => {
             initLeafBg();
+            loadFromLocalStorage(); // 读取本地持久化题库
             updateHeaderAndStartModal();
         };
     </script>
