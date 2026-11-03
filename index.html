@@ -4,8 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ARENAQ 问答竞赛</title>
-    <!-- 引入 Supabase JS SDK -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         :root {
             --primary-green: #15803d;
@@ -720,6 +718,117 @@
             .cat-grid { grid-template-columns: 1fr; }
             .timer-settings-box { flex-direction: column; align-items: stretch; }
         }
+
+        /* 四人独立作答模式 */
+        #fourPlayerGrid {
+            display: none;
+            width: 98%;
+            max-width: 1600px;
+            flex: 1;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+            margin: 15px 0;
+            position: relative;
+            z-index: 10;
+            min-height: 0;
+        }
+        body.four-mode main { display: none; }
+        body.four-mode #fourPlayerGrid { display: grid; }
+        body.four-mode .score-board-center { display: none; }
+        .player-box {
+            min-width: 0;
+            position: relative;
+            background: var(--card-bg);
+            border: 3px solid var(--player-color, #64748b);
+            border-radius: 18px;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            box-shadow: 0 8px 22px rgba(0,0,0,.07);
+            overflow: hidden;
+        }
+        .player-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 6px;
+            border-bottom: 2px dashed #e2e8f0;
+            padding-bottom: 8px;
+        }
+        .player-name {
+            color: #fff;
+            background: var(--player-color, #64748b);
+            border-radius: 12px;
+            padding: 5px 9px;
+            font-size: clamp(.85rem, 1.3vw, 1.15rem);
+            font-weight: bold;
+            white-space: nowrap;
+        }
+        .player-score {
+            font-size: clamp(1.3rem, 2vw, 2rem);
+            font-weight: bold;
+            color: var(--player-color, #334155);
+            white-space: nowrap;
+        }
+        .player-question {
+            flex: 1;
+            min-height: 110px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 12px 8px;
+            font-size: clamp(.9rem, 1.25vw, 1.15rem);
+            font-weight: bold;
+            line-height: 1.5;
+            overflow-wrap: anywhere;
+        }
+        .player-options {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 7px;
+        }
+        .player-options .option-btn {
+            min-height: 42px;
+            padding: 7px 8px;
+            font-size: clamp(.78rem, 1vw, .98rem);
+            text-align: left;
+        }
+        .player-feedback {
+            min-height: 22px;
+            text-align: center;
+            font-size: .85rem;
+            font-weight: bold;
+            color: var(--player-color, #334155);
+        }
+        .four-result-list {
+            display: grid;
+            gap: 9px;
+            margin: 15px 0;
+            text-align: left;
+        }
+        .four-result-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 14px;
+            border-radius: 12px;
+            background: #f1f5f9;
+            font-weight: bold;
+        }
+        .four-result-row:first-child { background: #fef3c7; color: #92400e; }
+        @media (max-width: 1050px) {
+            #fourPlayerGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .player-question { min-height: 90px; }
+        }
+        @media (max-width: 600px) {
+            #fourPlayerGrid { grid-template-columns: 1fr; }
+        }
+
     </style>
 </head>
 <body>
@@ -806,6 +915,9 @@
         </div>
     </main>
 
+    <!-- 四人独立作答区：选择四人模式后显示 -->
+    <section id="fourPlayerGrid" aria-label="四人独立答题区域"></section>
+
     <!-- 开始 Modal -->
     <div class="modal-mask" id="startModal">
         <div class="modal-card">
@@ -813,7 +925,7 @@
             <div class="modal-desc">
                 主题：<b id="startTopicName" style="color:var(--primary-green);">请先添加主题</b>（<b id="startQCount" style="color:#0284c7;">0</b> 题）<br>
                 时间：<b id="startTimerInfo" style="color:#b45309;">3 分钟 (单轮 15 秒)</b><br><br>
-                💡 答对得 1 分；答错将<b>顺流给对方回答</b>！
+                💡 <span id="startModeHint">双队伍：答对得 1 分；答错将题目转交给对方。</span>
             </div>
             <div class="btn-group">
                 <button class="action-btn secondary" onclick="openCatListModal()">⚙️ 题库与时间设置</button>
@@ -822,10 +934,19 @@
         </div>
     </div>
 
-    <!-- 设置 Modal -->
+    <!-- 设置 Modal (包含主题列表与时间设置) -->
     <div class="modal-mask hidden" id="catListModal">
         <div class="modal-card">
             <div class="modal-title">⚙️ 竞赛与题库设置</div>
+
+            <!-- 比赛模式 -->
+            <div class="timer-settings-box" style="margin-bottom:10px;">
+                <div style="font-weight:bold; color:var(--primary-green);">🎮 游玩模式：</div>
+                <select id="gameModeInput" class="form-select" style="max-width:220px;">
+                    <option value="two">双队伍模式</option>
+                    <option value="four">四人独立作答模式</option>
+                </select>
+            </div>
 
             <!-- 时间手动设置 -->
             <div class="timer-settings-box">
@@ -956,12 +1077,13 @@
                 <span style="color: var(--right-accent)" id="endScoreRight">0</span>
             </div>
             <div class="modal-desc" id="endDesc">胜负已分！</div>
+            <div id="fourResultList" class="four-result-list" style="display:none;"></div>
             <button class="action-btn" onclick="restartGame()">重新开始</button>
         </div>
     </div>
 
     <script>
-        // --- 音效合成器 ---
+        // 音效合成器
         class SoundFX {
             constructor() { this.ctx = null; }
             init() {
@@ -1019,26 +1141,18 @@
 
         const sfx = new SoundFX();
 
-        // --- Supabase 真实云端同步绑定 ---
-        const SUPABASE_URL = 'https://mffsdzrdfsuxyjjlprgd.supabase.co';
-        const SUPABASE_ANON_KEY = 'sb_publishable_54louVW13FBOjb76jUoifw_A1qyxTPX';
-
-        let supabaseClient = null;
-        if (window.supabase) {
-            try {
-                supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-            } catch (e) {
-                console.error('Supabase 初始化提示:', e);
-            }
-        }
-
+        // 数据结构与计时参数
         let categories = [];
         let selectedCatId = null; 
         let managingCatId = null; 
         let currentEditingQIndex = -1; 
 
+        // 可手动调整的时间变量
         let totalTimeMinutes = 3;
         let turnTimeSeconds = 15;
+        let gameMode = 'two';
+        const playerColors = ['#0284c7', '#16a34a', '#d97706', '#9333ea'];
+        let fourPlayers = [];
 
         let remainingQuestions = [];
         let currentQuestion = null;
@@ -1047,58 +1161,6 @@
         let totalTimeLeft = 180, totalTimerInterval = null;
         let turnTimeLeft = 15, turnTimerInterval = null;
         const optionBadges = ['A', 'B', 'C', 'D'];
-
-        // 云端 + 本地 双保存
-        async function saveData() {
-            localStorage.setItem('arenaq_categories_data', JSON.stringify(categories));
-            localStorage.setItem('arenaq_selected_cat_id', selectedCatId || '');
-            localStorage.setItem('arenaq_total_time', totalTimeMinutes);
-            localStorage.setItem('arenaq_turn_time', turnTimeSeconds);
-
-            if (supabaseClient) {
-                try {
-                    await supabaseClient.from('arenaq_db').upsert({ id: 'global_bank', categories: categories });
-                } catch (e) {
-                    console.error('Supabase 保存错误:', e);
-                }
-            }
-        }
-
-        // 读取云端与本地数据
-        async function loadData() {
-            const localCats = localStorage.getItem('arenaq_categories_data');
-            const localSel = localStorage.getItem('arenaq_selected_cat_id');
-            const localTot = localStorage.getItem('arenaq_total_time');
-            const localTrn = localStorage.getItem('arenaq_turn_time');
-
-            if (localCats) {
-                try { categories = JSON.parse(localCats); } catch(e){}
-            }
-            if (localSel) selectedCatId = localSel;
-            if (localTot) totalTimeMinutes = parseInt(localTot);
-            if (localTrn) turnTimeSeconds = parseInt(localTrn);
-
-            if (supabaseClient) {
-                try {
-                    const { data } = await supabaseClient.from('arenaq_db').select('*').eq('id', 'global_bank');
-                    if (data && data.length > 0 && data[0].categories) {
-                        categories = data[0].categories;
-                        localStorage.setItem('arenaq_categories_data', JSON.stringify(categories));
-                    }
-                } catch (e) {
-                    console.error('Supabase 读取错误:', e);
-                }
-            }
-
-            if (!selectedCatId && categories.length > 0) {
-                selectedCatId = categories[0].id;
-            }
-
-            document.getElementById('totalTimeInput').value = totalTimeMinutes;
-            document.getElementById('turnTimeInput').value = turnTimeSeconds;
-
-            updateHeaderAndStartModal();
-        }
 
         // 初始化背景
         function initLeafBg() {
@@ -1116,6 +1178,7 @@
             }
         }
 
+        // 渲染主题列表
         function renderCategoryGrid() {
             const container = document.getElementById('catGridBox');
             container.innerHTML = '';
@@ -1147,7 +1210,6 @@
 
         function selectCategory(catId) {
             selectedCatId = catId;
-            saveData();
             renderCategoryGrid();
             updateHeaderAndStartModal();
         }
@@ -1170,7 +1232,6 @@
             if (!selectedCatId) selectedCatId = newCat.id;
             
             input.value = '';
-            saveData();
             renderCategoryGrid();
             updateHeaderAndStartModal();
         }
@@ -1181,7 +1242,6 @@
                 if (selectedCatId === catId) {
                     selectedCatId = categories.length > 0 ? categories[0].id : null;
                 }
-                saveData();
                 renderCategoryGrid();
                 updateHeaderAndStartModal();
             }
@@ -1206,10 +1266,9 @@
 
                     categories.push(newCat);
                     selectedCatId = newCat.id;
-                    saveData();
                     renderCategoryGrid();
                     updateHeaderAndStartModal();
-                    alert(`✅ 主题“${title}”已成功上传并上传到云端！`);
+                    alert(`✅ 主题“${title}”导入成功！`);
                 } catch (err) {
                     alert("格式解析失败，请检查文件！");
                 }
@@ -1286,7 +1345,6 @@
             document.getElementById('newOptC').value = '';
             document.getElementById('newOptD').value = '';
 
-            saveData();
             renderQuestionListInCat();
         }
 
@@ -1294,7 +1352,6 @@
             const cat = categories.find(c => c.id === managingCatId);
             if (cat) {
                 cat.questions.splice(idx, 1);
-                saveData();
                 renderQuestionListInCat();
             }
         }
@@ -1343,19 +1400,20 @@
                 ans: correctAns
             };
 
-            saveData();
             closeEditModal();
             renderQuestionListInCat();
         }
 
         function saveSettingsAndClose() {
+            // 读取手动调整的时间
             const totInput = parseInt(document.getElementById('totalTimeInput').value);
             const trnInput = parseInt(document.getElementById('turnTimeInput').value);
 
             if (totInput && totInput > 0) totalTimeMinutes = totInput;
             if (trnInput && trnInput > 0) turnTimeSeconds = trnInput;
+            gameMode = document.getElementById('gameModeInput').value;
+            updateModePresentation();
 
-            saveData();
             document.getElementById('catListModal').classList.add('hidden');
             updateHeaderAndStartModal();
 
@@ -1363,8 +1421,17 @@
             if (currentCat && currentCat.questions.length > 0) {
                 remainingQuestions = [...currentCat.questions];
                 shuffleArray(remainingQuestions);
-                loadNextQuestion();
+                currentQuestion = remainingQuestions.pop();
+                renderQuestion();
             }
+        }
+
+        function updateModePresentation() {
+            const hint = document.getElementById('startModeHint');
+            if (!hint) return;
+            hint.innerText = gameMode === 'four'
+                ? '四人模式：四個答题区各自独立作答，答对得 1 分；时间结束后按正确题数排名。'
+                : '双队伍：答对得 1 分；答错将题目转交给对方。';
         }
 
         function updateHeaderAndStartModal() {
@@ -1387,10 +1454,211 @@
             clearInterval(totalTimerInterval);
             clearInterval(turnTimerInterval);
             renderCategoryGrid();
+            document.getElementById('gameModeInput').value = gameMode;
             document.getElementById('catListModal').classList.remove('hidden');
         }
 
-        // 随机打乱函数
+        // 比赛流程控制
+        function startGame() {
+            const currentCat = categories.find(c => c.id === selectedCatId);
+            if (!currentCat || currentCat.questions.length === 0) {
+                alert("请先选择或添加包含题目的主题！");
+                return;
+            }
+
+            document.getElementById('startModal').classList.add('hidden');
+            document.getElementById('endModal').classList.add('hidden');
+            totalTimeLeft = totalTimeMinutes * 60;
+
+            if (gameMode === 'four') {
+                startFourPlayerGame(currentCat.questions);
+            } else {
+                document.body.classList.remove('four-mode');
+                document.getElementById('fourPlayerGrid').innerHTML = '';
+                document.getElementById('fourResultList').style.display = 'none';
+                document.getElementById('endScoreLeft').parentElement.style.display = 'flex';
+                scoreLeft = 0; scoreRight = 0;
+                updateScoreDisplay();
+
+                remainingQuestions = [...currentCat.questions];
+                shuffleArray(remainingQuestions);
+                activeSide = 'left';
+                loadNextQuestion();
+                startTotalTimer();
+                startTurnTimer();
+            }
+        }
+
+
+        // 四人模式：每位玩家拥有独立题目队列、作答区域和正确题数。
+        function startFourPlayerGame(questionBank) {
+            clearInterval(turnTimerInterval);
+            document.body.classList.add('four-mode');
+            document.getElementById('fourResultList').style.display = 'none';
+            document.getElementById('endScoreLeft').parentElement.style.display = 'none';
+
+            fourPlayers = Array.from({ length: 4 }, (_, index) => ({
+                id: index,
+                name: `选手 ${index + 1}`,
+                color: playerColors[index],
+                score: 0,
+                questions: [...questionBank],
+                currentQuestion: null,
+                answered: 0
+            }));
+
+            fourPlayers.forEach(player => {
+                shuffleArray(player.questions);
+                player.currentQuestion = player.questions.pop() || null;
+            });
+
+            renderFourPlayerPanels();
+            startTotalTimer();
+        }
+
+        function renderFourPlayerPanels() {
+            const grid = document.getElementById('fourPlayerGrid');
+            grid.innerHTML = '';
+
+            fourPlayers.forEach(player => {
+                const panel = document.createElement('article');
+                panel.className = 'player-box';
+                panel.style.setProperty('--player-color', player.color);
+                panel.id = `playerPanel${player.id}`;
+
+                const top = document.createElement('div');
+                top.className = 'player-top';
+
+                const name = document.createElement('div');
+                name.className = 'player-name';
+                name.textContent = player.name;
+
+                const score = document.createElement('div');
+                score.className = 'player-score';
+                score.id = `playerScore${player.id}`;
+                score.textContent = `答对 ${player.score} 题`;
+
+                top.append(name, score);
+
+                const question = document.createElement('div');
+                question.className = 'player-question';
+                question.id = `playerQuestion${player.id}`;
+
+                const options = document.createElement('div');
+                options.className = 'player-options';
+                options.id = `playerOptions${player.id}`;
+
+                const feedback = document.createElement('div');
+                feedback.className = 'player-feedback';
+                feedback.id = `playerFeedback${player.id}`;
+                feedback.textContent = '准备作答';
+
+                panel.append(top, question, options, feedback);
+                grid.appendChild(panel);
+                renderFourPlayerQuestion(player);
+            });
+        }
+
+        function renderFourPlayerQuestion(player) {
+            const questionEl = document.getElementById(`playerQuestion${player.id}`);
+            const optionsEl = document.getElementById(`playerOptions${player.id}`);
+            const feedbackEl = document.getElementById(`playerFeedback${player.id}`);
+            if (!questionEl || !optionsEl || !feedbackEl) return;
+
+            optionsEl.innerHTML = '';
+            if (!player.currentQuestion) {
+                questionEl.textContent = '题库暂无题目';
+                feedbackEl.textContent = '无法作答';
+                return;
+            }
+
+            questionEl.textContent = player.currentQuestion.q;
+            player.currentQuestion.options.forEach((optionText, index) => {
+                const button = document.createElement('button');
+                button.className = 'option-btn';
+                button.type = 'button';
+                button.innerHTML = `<div class="option-badge">${optionBadges[index]}</div><span></span>`;
+                button.querySelector('span').textContent = optionText;
+                button.addEventListener('click', () => handleFourPlayerAnswer(player.id, index));
+                optionsEl.appendChild(button);
+            });
+        }
+
+        function handleFourPlayerAnswer(playerId, selectedIndex) {
+            if (totalTimeLeft <= 0) return;
+            const player = fourPlayers[playerId];
+            if (!player || !player.currentQuestion) return;
+
+            const feedback = document.getElementById(`playerFeedback${playerId}`);
+            const optionButtons = document.querySelectorAll(`#playerOptions${playerId} button`);
+            optionButtons.forEach(button => button.disabled = true);
+            player.answered++;
+
+            if (selectedIndex === player.currentQuestion.ans) {
+                player.score++;
+                sfx.playCorrect();
+                feedback.textContent = '✓ 正确！+1';
+                feedback.style.color = player.color;
+            } else {
+                sfx.playWrong();
+                feedback.textContent = '✗ 错误，再接再厉！';
+                feedback.style.color = '#ef4444';
+            }
+
+            document.getElementById(`playerScore${playerId}`).textContent = `答对 ${player.score} 题`;
+
+            // 只更新作答者自己的题目，不影响其他三位玩家。
+            setTimeout(() => {
+                if (totalTimeLeft <= 0) return;
+                if (player.questions.length === 0) {
+                    player.questions = fourPlayersQuestionBank();
+                    shuffleArray(player.questions);
+                }
+                player.currentQuestion = player.questions.pop() || null;
+                renderFourPlayerQuestion(player);
+                feedback.textContent = '请作答';
+                feedback.style.color = player.color;
+            }, 220);
+        }
+
+        function fourPlayersQuestionBank() {
+            const category = categories.find(item => item.id === selectedCatId);
+            return category ? [...category.questions] : [];
+        }
+
+        function renderFourPlayerResults() {
+            const ranked = [...fourPlayers].sort((a, b) => b.score - a.score || a.id - b.id);
+            const resultList = document.getElementById('fourResultList');
+            resultList.innerHTML = '';
+            resultList.style.display = 'grid';
+            document.getElementById('endScoreLeft').parentElement.style.display = 'none';
+
+            ranked.forEach((player, index) => {
+                const row = document.createElement('div');
+                row.className = 'four-result-row';
+                const rank = document.createElement('span');
+                rank.textContent = `${index + 1}. ${player.name}`;
+                const score = document.createElement('span');
+                score.textContent = `${player.score} 题答对`;
+                row.append(rank, score);
+                resultList.appendChild(row);
+            });
+
+            const topScore = ranked[0]?.score ?? 0;
+            const winners = ranked.filter(player => player.score === topScore);
+            document.getElementById('endTitle').innerText =
+                winners.length === 1 ? `🏆 ${winners[0].name} 获胜！` : '🏆 比赛结束！';
+            document.getElementById('endDesc').innerText =
+                winners.length === 1
+                    ? `${winners[0].name} 答对最多题目，获得第一名！`
+                    : `共有 ${winners.length} 位选手并列第一名。`;
+        }
+
+        function restartGame() {
+            document.getElementById('endModal').classList.add('hidden');
+            startGame();
+        }
+
         function shuffleArray(arr) {
             for (let i = arr.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
@@ -1398,31 +1666,15 @@
             }
         }
 
-        // 抽题与【双重随机打乱：题目 + 答案选项】
         function loadNextQuestion() {
             const currentCat = categories.find(c => c.id === selectedCatId);
             if (!currentCat || currentCat.questions.length === 0) return;
 
-            // 1. 打乱题目顺序
             if (remainingQuestions.length === 0) {
                 remainingQuestions = [...currentCat.questions];
                 shuffleArray(remainingQuestions);
             }
-            const rawQuestion = remainingQuestions.pop();
-
-            // 2. 随机打乱 4 个选项并跟踪正确答案索引
-            let optionsWithCorrect = rawQuestion.options.map((opt, idx) => ({
-                text: opt,
-                isCorrect: idx === rawQuestion.ans
-            }));
-            shuffleArray(optionsWithCorrect);
-
-            currentQuestion = {
-                q: rawQuestion.q,
-                options: optionsWithCorrect.map(o => o.text),
-                ans: optionsWithCorrect.findIndex(o => o.isCorrect)
-            };
-
+            currentQuestion = remainingQuestions.pop();
             renderQuestion();
         }
 
@@ -1552,50 +1804,31 @@
             setTimeout(() => container.classList.remove('show'), 1600);
         }
 
-        function startGame() {
-            const currentCat = categories.find(c => c.id === selectedCatId);
-            if (!currentCat || currentCat.questions.length === 0) {
-                alert("请先选择或添加包含题目的主题！");
-                return;
-            }
-
-            document.getElementById('startModal').classList.add('hidden');
-            scoreLeft = 0; scoreRight = 0;
-            updateScoreDisplay();
-
-            remainingQuestions = [...currentCat.questions];
-            shuffleArray(remainingQuestions);
-
-            totalTimeLeft = totalTimeMinutes * 60;
-            activeSide = 'left';
-
-            loadNextQuestion();
-            startTotalTimer();
-            startTurnTimer();
-        }
-
-        function restartGame() {
-            document.getElementById('endModal').classList.add('hidden');
-            startGame();
-        }
-
         function endGame() {
+            clearInterval(turnTimerInterval);
             sfx.playWin();
-            document.getElementById('endScoreLeft').innerText = scoreLeft;
-            document.getElementById('endScoreRight').innerText = scoreRight;
 
-            const titleEl = document.getElementById('endTitle');
-            const descEl = document.getElementById('endDesc');
-
-            if (scoreLeft > scoreRight) {
-                titleEl.innerText = "🏆 左方获胜！";
-                descEl.innerText = "表现出色，赢得了本场比赛！";
-            } else if (scoreRight > scoreLeft) {
-                titleEl.innerText = "🏆 右方获胜！";
-                descEl.innerText = "表现出色，赢得了本场比赛！";
+            if (gameMode === 'four') {
+                renderFourPlayerResults();
             } else {
-                titleEl.innerText = "🤝 势均力敌！平局！";
-                descEl.innerText = "双方打成平手！非常精彩！";
+                document.getElementById('fourResultList').style.display = 'none';
+                document.getElementById('endScoreLeft').parentElement.style.display = 'flex';
+                document.getElementById('endScoreLeft').innerText = scoreLeft;
+                document.getElementById('endScoreRight').innerText = scoreRight;
+
+                const titleEl = document.getElementById('endTitle');
+                const descEl = document.getElementById('endDesc');
+
+                if (scoreLeft > scoreRight) {
+                    titleEl.innerText = "🏆 左方获胜！";
+                    descEl.innerText = "表现出色，赢得了本场比赛！";
+                } else if (scoreRight > scoreLeft) {
+                    titleEl.innerText = "🏆 右方获胜！";
+                    descEl.innerText = "表现出色，赢得了本场比赛！";
+                } else {
+                    titleEl.innerText = "🤝 势均力敌！平局！";
+                    descEl.innerText = "双方打成平手！非常精彩！";
+                }
             }
 
             document.getElementById('endModal').classList.remove('hidden');
@@ -1603,7 +1836,7 @@
 
         function downloadTemplate() {
             const templateData = {
-                topic: "示例主题",
+                topic: "自定义主题示例",
                 questions: [
                     {
                         q: "示例问题一？",
@@ -1621,9 +1854,10 @@
             downloadAnchor.remove();
         }
 
-        window.onload = async () => {
+        window.onload = () => {
             initLeafBg();
-            await loadData();
+            updateHeaderAndStartModal();
+            updateModePresentation();
         };
     </script>
 </body>
