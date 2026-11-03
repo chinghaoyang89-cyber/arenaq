@@ -305,6 +305,56 @@
             gap: 10px;
         }
 
+
+        /* 点击答案时的即时视觉反馈：不改变题目、计分或游戏流程 */
+        @keyframes answerTapPop {
+            0% { transform: scale(1); }
+            45% { transform: scale(1.045); }
+            100% { transform: scale(1); }
+        }
+        @keyframes answerCorrectGlow {
+            0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+            45% { box-shadow: 0 0 0 6px rgba(34, 197, 94, .22), 0 8px 22px rgba(22, 163, 74, .24); }
+            100% { box-shadow: 0 0 0 3px rgba(34, 197, 94, .12), 0 4px 14px rgba(22, 163, 74, .16); }
+        }
+        @keyframes answerWrongShake {
+            0%, 100% { transform: translateX(0); }
+            20% { transform: translateX(-5px); }
+            40% { transform: translateX(5px); }
+            60% { transform: translateX(-3px); }
+            80% { transform: translateX(3px); }
+        }
+        .option-btn.answer-correct {
+            border-color: #16a34a !important;
+            background: linear-gradient(135deg, #dcfce7, #bbf7d0) !important;
+            color: #166534;
+            animation: answerTapPop .28s ease-out, answerCorrectGlow .42s ease-out forwards;
+        }
+        .option-btn.answer-wrong {
+            border-color: #ef4444 !important;
+            background: linear-gradient(135deg, #fee2e2, #fecaca) !important;
+            color: #991b1b;
+            animation: answerWrongShake .36s ease-in-out;
+        }
+        .option-btn.answer-correct .option-badge {
+            background: #16a34a !important;
+            color: #fff !important;
+        }
+        .option-btn.answer-wrong .option-badge {
+            background: #ef4444 !important;
+            color: #fff !important;
+        }
+        .option-btn.answer-locked {
+            opacity: .62;
+            cursor: default;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .option-btn.answer-correct,
+            .option-btn.answer-wrong {
+                animation: none !important;
+            }
+        }
+
         .option-btn {
             background: #ffffff;
             border: 2px solid #cbd5e1;
@@ -1707,7 +1757,17 @@
 
             const feedback = document.getElementById(`playerFeedback${playerId}`);
             const optionButtons = document.querySelectorAll(`#playerOptions${playerId} button`);
-            optionButtons.forEach(button => button.disabled = true);
+            const selectedButton = optionButtons[selectedIndex];
+            optionButtons.forEach(button => {
+                button.disabled = true;
+                button.classList.add('answer-locked');
+            });
+            if (selectedButton) {
+                selectedButton.classList.remove('answer-locked');
+                selectedButton.classList.add(
+                    selectedIndex === player.currentQuestion.ans ? 'answer-correct' : 'answer-wrong'
+                );
+            }
             player.answered++;
 
             if (selectedIndex === player.currentQuestion.ans) {
@@ -1804,7 +1864,7 @@
                 currentQuestion.options.forEach((optText, idx) => {
                     const btn = document.createElement('button');
                     btn.className = 'option-btn';
-                    btn.onclick = () => handleAnswer(idx);
+                    btn.onclick = () => handleTwoTeamAnswerClick(idx, btn);
                     btn.innerHTML = `<div class="option-badge">${optionBadges[idx]}</div><span>${optText}</span>`;
                     container.appendChild(btn);
                 });
@@ -1823,6 +1883,23 @@
                 bR.classList.add('active'); bL.classList.remove('active');
                 iR.innerText = "🎯 答题中"; iL.innerText = "⏳ 等待";
             }
+        }
+
+        function handleTwoTeamAnswerClick(selectedIndex, clickedButton) {
+            const buttons = document.querySelectorAll('#optionsLeft .option-btn, #optionsRight .option-btn');
+            if (!clickedButton || clickedButton.disabled) return;
+
+            buttons.forEach(button => {
+                button.disabled = true;
+                button.classList.add('answer-locked');
+            });
+
+            const isCorrect = currentQuestion && selectedIndex === currentQuestion.ans;
+            clickedButton.classList.remove('answer-locked');
+            clickedButton.classList.add(isCorrect ? 'answer-correct' : 'answer-wrong');
+
+            // Tunjukkan maklum balas visual seketika sebelum meneruskan aliran permainan asal.
+            setTimeout(() => handleAnswer(selectedIndex), 260);
         }
 
         function handleAnswer(selectedIndex) {
